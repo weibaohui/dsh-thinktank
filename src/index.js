@@ -515,6 +515,48 @@ module.exports = {
       return rec
     }
 
+    // ── 基于报告的追问对话（followup）──每次追问起一个新鲜小会话，
+    // 种子上下文 = 报告紧凑版 + 追问历史 + 新问题；答案落回 report.followups。
+    async function runFollowup(job) {
+      try {
+        const table = await storeTable('reports')
+        const report = await table.get(job.reportId)
+        if (!report || !report.id) throw new Error('报告不存在或已被删除')
+        const history = Array.isArray(report.followups) ? report.followups : []
+        const text = await runSession(
+          'fu',
+          prompt.buildFollowupPrompt(report, history, job.question),
+          (session) => { job.session = session },
+          8 * 60 * 1000,
+          sessionTitleFor(job.question, '追问'),
+        )
+        const answer = String(text || '').trim()
+        if (!answer) throw new Error('AI 未返回内容')
+        job.answer = answer
+        job.status = 'done'
+        // 问答对写回报告（重启后仍在）
+        const fresh = (await table.get(job.reportId)) || report
+        const followups = Array.isArray(fresh.followups) ? fresh.followups : []
+        followups.push({ id: `f-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`, q: job.question, a: answer, at: new Date().toISOString() })
+        fresh.followups = followups
+        try { await saveReport(fresh) } catch { /* 存储不可用：答案仍在内存 job 里 */ }
+      } catch (e) {
+        job.status = 'error'
+        job.error = String((e && e.message) || e).slice(0, 300)
+      }
+    }
+
+    function startFollowup(reportId, question) {
+      const id = `fu-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`
+      const job = { id, kind: 'followup', reportId, question, status: 'running', answer: '', error: '', startedAt: Date.now(), session: null }
+      recJobs.set(id, job)
+      for (const [jid, j] of recJobs) {
+        if (Date.now() - j.startedAt > 30 * 60 * 1000) recJobs.delete(jid)
+      }
+      runFollowup(job).catch(() => {})
+      return job
+    }
+
     // ── AI 拷问澄清（grill）──分析前的意图澄清：AI 出要害追问，用户作答后
     // 并入背景，让后续多模型分析更贴身。与推荐共用任务基础设施。
     async function runGrill(job) {
@@ -666,6 +708,39 @@ module.exports = {
                 textTail: job.textTail || '',
                 questions: job.questions,
                 rationale: job.rationale,
+                error: job.error || undefined,
+                elapsedMs: Date.now() - job.startedAt,
+              })
+              return
+            }
+
+            if (req.method === 'POST' && path.endsWith('/followup')) {
+              let body = {}
+              try { body = JSON.parse((await readBody(req, 64 * 1024)) || '{}') } catch { /* 空体 */ }
+              const reportId = typeof body.reportId === 'string' ? body.reportId.trim().slice(0, 80) : ''
+              const question = typeof body.question === 'string' ? body.question.trim().slice(0, 1000) : ''
+              if (!reportId || !question) { sendJson(400, { errors: ['reportId 与 question 不能为空'] }); return }
+              if (!agentsService()) { sendJson(503, { error: 'agents 服务不可用，追问不可用' }); return }
+              const table = await storeTable('reports')
+              const report = await table.get(reportId)
+              if (!report || !report.id) { sendJson(404, { error: '报告不存在' }); return }
+              const job = startFollowup(reportId, question)
+              sendJson(202, { id: job.id })
+              return
+            }
+
+            if (req.method === 'GET' && path.endsWith('/followup')) {
+              const job = recJobs.get(url.searchParams.get('id') || '')
+              if (!job || job.kind !== 'followup') { sendJson(404, { error: '追问任务不存在（宿主重启后不保留）' }); return }
+              if (job.status === 'running' && job.session) {
+                try { job.textTail = liveTextTail(job.session) } catch { /* 保持上次值 */ }
+              }
+              sendJson(200, {
+                id: job.id,
+                status: job.status,
+                reportId: job.reportId,
+                textTail: job.textTail || '',
+                answer: job.answer || '',
                 error: job.error || undefined,
                 elapsedMs: Date.now() - job.startedAt,
               })

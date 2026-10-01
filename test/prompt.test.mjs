@@ -152,3 +152,22 @@ test('normalizeQuestions：去重、截断、上限 6', () => {
   const many = P.normalizeQuestions({ questions: Array.from({ length: 10 }, (_, i) => ({ q: 'q' + i })) })
   assert.equal(many.questions.length, 6, '上限 6 问')
 })
+
+test('compactReportContext + buildFollowupPrompt：紧凑上下文与追问契约', () => {
+  const report = {
+    question: '要不要做民宿？', context: '预算 8 万',
+    synthesis: { summary: '小步试点', consensus: ['先调研'], conflicts: [], blindspots: ['合规'], priorities: [{ action: '调研竞品', why: 'w' }] },
+    results: [{ id: 'swot', verdict: '机会大于威胁', signal: 'positive', insights: ['品牌强'], analysis: 'x'.repeat(5000) }],
+  }
+  const ctx = P.compactReportContext(report)
+  assert.match(ctx, /要不要做民宿/)
+  assert.match(ctx, /小步试点/)
+  assert.match(ctx, /【SWOT 分析｜positive】/)
+  assert.ok(ctx.length < 2000, '完整分析不进上下文（紧凑版）')
+  const t = P.buildFollowupPrompt(report, [{ q: 'q1', a: 'a1' }], '预算砍半会怎样？')
+  assert.match(t, /首席顾问/)
+  assert.match(t, /问：q1/)
+  assert.match(t, /预算砍半会怎样？/)
+  assert.match(t, /报告外的补充视角/)
+  assert.ok(!t.includes(P.JSON_MARKER), '追问无 JSON 协议')
+})

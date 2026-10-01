@@ -268,3 +268,20 @@ test('AI 拷问：无 agents 服务时 503（可跳过继续）；未知 id 404'
     for (const cleanup of cleanups) cleanup()
   }
 })
+
+test('追问：无 agents 503；报告不存在 404；参数缺失 400', async () => {
+  const medium = new Map()
+  const { ctx, routes, cleanups } = mockCtx(medium)
+  try {
+    Host.apply(ctx)
+    const route = routes[0]
+    const r1 = mockRes()
+    await route.handler(mockReq('POST', '/dsh-thinktank/api/followup', JSON.stringify({ reportId: 'r-x', question: 'q' })), r1)
+    assert.equal(r1.status, 503)
+    const r2 = mockRes()
+    await route.handler(mockReq('POST', '/dsh-thinktank/api/followup', JSON.stringify({ question: 'q' })), r2)
+    assert.equal(r2.status, 400)
+  } finally {
+    for (const cleanup of cleanups) cleanup()
+  }
+})

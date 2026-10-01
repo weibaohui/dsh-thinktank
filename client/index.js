@@ -495,8 +495,80 @@ function ModelPicker({ selected, onToggle, onBatch, question, context, agentsOk 
   )
 }
 
+// ── 基于报告结论的追问对话 ──────────────────────────────────────────────────
+function FollowupSection({ report, agentsOk }) {
+  const [items, setItems] = React.useState(() => (Array.isArray(report.followups) ? report.followups : []))
+  const [input, setInput] = React.useState('')
+  const [running, setRunning] = React.useState(null) // { id, q, textTail }
+  const [err, setErr] = React.useState('')
+  const liveRef = React.useRef(null)
+
+  React.useEffect(() => {
+    if (!running) return undefined
+    const id = running.id
+    const t = setInterval(async () => {
+      try {
+        const j = await api('GET', `/followup?id=${encodeURIComponent(id)}`)
+        setRunning((cur) => (cur && cur.id === id ? { ...cur, textTail: j.textTail || '' } : cur))
+        if (j.status === 'done') {
+          setItems((cur) => [...cur, { q: running.q, a: j.answer || '' }])
+          setRunning(null)
+        } else if (j.status === 'error') {
+          setErr(j.error || '追问失败')
+          setRunning(null)
+        }
+      } catch (e) { setErr(String(e.message || e)); setRunning(null) }
+    }, 1000)
+    return () => clearInterval(t)
+  }, [running && running.id])
+
+  React.useEffect(() => {
+    const el = liveRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [running && running.textTail])
+
+  const send = async () => {
+    const q = input.trim()
+    if (!q || running) return
+    setErr('')
+    try {
+      const r = await api('POST', '/followup', { reportId: report.id, question: q })
+      setRunning({ id: r.id, q, textTail: '' })
+      setInput('')
+    } catch (e) { setErr(String(e.message || e)) }
+  }
+
+  return h('div', { style: { marginTop: 18, borderTop: '1px solid var(--mm-border)', paddingTop: 12 } },
+    h('div', { style: { fontWeight: 700, marginBottom: 4 } }, '💬 基于结论继续追问'),
+    h('div', { className: 'dshmm-sub', style: { marginBottom: 8 } }, '首席顾问持有整份报告的上下文（综合结论 + 各模型结论），针对报告继续盘问；超出报告范围的问题会如实注明。'),
+    err ? h('div', { className: 'dshmm-err' }, err) : null,
+    items.map((f, i) => h('div', { key: f.id || i, style: { marginBottom: 10 } },
+      h('div', { style: { fontWeight: 600, fontSize: 12 } }, `问：${f.q}`),
+      h('div', { className: 'dshmm-analysis', style: { marginTop: 4 } }, f.a),
+    )),
+    running ? h('div', { className: 'dshmm-card', style: { padding: '10px 12px', marginBottom: 10 } },
+      h('div', { className: 'dshmm-row', style: { marginBottom: 6 } },
+        h('span', { className: 'dshmm-spin' }),
+        h('div', { style: { fontWeight: 600, fontSize: 12 } }, `问：${running.q}`),
+      ),
+      h('div', { ref: liveRef, className: 'dshmm-ai-live', style: { height: 140 } }, running.textTail || '（首席顾问思考中…）'),
+    ) : null,
+    h('div', { className: 'dshmm-row', style: { alignItems: 'flex-start' } },
+      h('textarea', {
+        className: 'dshmm-ta', style: { flex: 1, minHeight: 52 },
+        placeholder: agentsOk === false ? '追问需要 agents 服务' : '例如：如果预算砍半，结论会怎么变？/ 行动清单排个 30 天计划',
+        value: input, onChange: (e) => setInput(e.target.value.slice(0, 1000)), maxLength: 1000,
+      }),
+      h('button', {
+        className: 'dshmm-btn primary', style: { padding: '10px 16px', flex: 'none' },
+        onClick: send, disabled: !input.trim() || !!running || agentsOk === false,
+      }, running ? '追问中…' : '追问'),
+    ),
+  )
+}
+
 // ── 报告视图 ────────────────────────────────────────────────────────────────
-function ReportView({ report, onBack, onDelete }) {
+function ReportView({ report, onBack, onDelete, agentsOk }) {
   const [catFilter, setCatFilter] = React.useState('')
   const [expand, setExpand] = React.useState({})
   const results = Array.isArray(report.results) ? report.results : []
@@ -621,6 +693,7 @@ function ReportView({ report, onBack, onDelete }) {
         )
       }),
     ),
+    h(FollowupSection, { report, agentsOk }),
   )
 }
 
@@ -1163,6 +1236,7 @@ function MindPanel({ variant }) {
       report,
       onBack: () => { setView('analyze') },
       onDelete: () => deleteReport(report.id),
+      agentsOk,
     }) : null,
     manual ? h(ManualModal, {
       question: question.trim(), context: context.trim(), modelIds: [...selected],

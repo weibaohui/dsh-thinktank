@@ -327,3 +327,57 @@ test('拷问澄清流水线：AI 出要害追问 → 校验 → 状态可读', a
     for (const cleanup of cleanups) cleanup()
   }
 })
+
+test('追问流水线：报告上下文 → 会话回答 → followups 持久化', async () => {
+  const medium = new Map()
+  const seenPrompts = []
+  const { ctx, routes, cleanups } = mockCtxWithAgents(medium, {
+    replyFor: (sessionId, text) => {
+      if (sessionId.includes('fu')) {
+        seenPrompts.push(text)
+        return '预算砍半的话，结论从「谨慎试点」变成「基本放弃」，正如损失厌恶指出的。'
+      }
+      // 先用 import 造报告不需要会话；防御性返回
+      return 'ok'
+    },
+  })
+  try {
+    Host.apply(ctx)
+    const route = routes[0]
+    // 造一份报告
+    const imp = mockRes()
+    await route.handler(mockReq('POST', '/dsh-thinktank/api/import', JSON.stringify({
+      question: '民宿短租',
+      raw: JSON.stringify({ results: [{ id: 'swot', verdict: '谨慎试点', signal: 'positive' }], synthesis: { summary: '小步试点' } }),
+    })), imp)
+    const { reportId } = JSON.parse(imp.body)
+
+    const start = mockRes()
+    await route.handler(mockReq('POST', '/dsh-thinktank/api/followup', JSON.stringify({ reportId, question: '预算砍半会怎样？' })), start)
+    assert.equal(start.status, 202)
+    const { id } = JSON.parse(start.body)
+
+    let job = null
+    for (let i = 0; i < 100; i++) {
+      const res = mockRes()
+      await route.handler(mockReq('GET', `/dsh-thinktank/api/followup?id=${id}`), res)
+      job = JSON.parse(res.body)
+      if (job.status !== 'running') break
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    assert.equal(job.status, 'done')
+    assert.match(job.answer, /基本放弃/)
+
+    // 问答对持久化进报告
+    const det = mockRes()
+    await route.handler(mockReq('GET', `/dsh-thinktank/api/report?id=${reportId}`), det)
+    const report = JSON.parse(det.body)
+    assert.equal(report.followups.length, 1)
+    assert.equal(report.followups[0].q, '预算砍半会怎样？')
+    assert.match(report.followups[0].a, /基本放弃/)
+    // 种子上下文带综合结论与新问题
+    assert.ok(seenPrompts.some((t) => t.includes('小步试点') && t.includes('预算砍半会怎样？')))
+  } finally {
+    for (const cleanup of cleanups) cleanup()
+  }
+})

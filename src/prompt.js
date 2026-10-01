@@ -237,6 +237,76 @@ function normalizeQuestions(parsed) {
   return { questions }
 }
 
+/**
+ * 把报告压缩成追问会话的种子上下文：综合结论全量 + 各模型结论/洞察紧凑版，
+ * 不带每个模型的完整分析（避免稀释对话）。
+ */
+function compactReportContext(report) {
+  const lines = []
+  lines.push('## 原始问题')
+  lines.push(String(report.question || ''))
+  if (report.context) { lines.push(''); lines.push('## 背景'); lines.push(String(report.context)) }
+  const syn = report.synthesis
+  if (syn) {
+    lines.push('')
+    lines.push('## 综合结论')
+    if (syn.summary) lines.push(syn.summary)
+    const list = (title, arr) => {
+      if (!Array.isArray(arr) || !arr.length) return
+      lines.push(`${title}：`)
+      for (const it of arr) lines.push(`- ${typeof it === 'string' ? it : it.action || ''}`)
+    }
+    list('模型共识', syn.consensus)
+    list('观点分歧', syn.conflicts)
+    list('盲区提醒', syn.blindspots)
+    if (Array.isArray(syn.priorities) && syn.priorities.length) {
+      lines.push('行动清单：')
+      syn.priorities.forEach((p, i) => lines.push(`${i + 1}. ${typeof p === 'string' ? p : `${p.action}${p.why ? `（${p.why}）` : ''}`}`))
+    }
+  }
+  const results = Array.isArray(report.results) ? report.results : []
+  if (results.length) {
+    lines.push('')
+    lines.push('## 各模型结论')
+    for (const r of results) {
+      const m = models.getModel(r.id)
+      const sig = r.signal || 'neutral'
+      const insights = Array.isArray(r.insights) ? r.insights.slice(0, 2).join('；') : ''
+      lines.push(`- 【${m ? m.name : r.id}｜${sig}】${r.verdict || ''}${insights ? `｜洞察：${insights}` : ''}`)
+    }
+  }
+  return lines.join('\n')
+}
+
+/**
+ * 追问提示词：基于既有报告结论回答用户的新问题（自然语言，无 JSON 协议）。
+ */
+function buildFollowupPrompt(report, history, question) {
+  const lines = []
+  lines.push('你是「智囊团」多模型分析的的首席顾问。一份由多个思维模型交叉分析生成的报告已完成，用户想基于报告结论继续追问。请以首席顾问的身份回答。')
+  lines.push('')
+  lines.push(compactReportContext(report))
+  const hist = Array.isArray(history) ? history.slice(-6) : []
+  if (hist.length) {
+    lines.push('')
+    lines.push('## 之前的追问')
+    for (const f of hist) {
+      lines.push(`问：${String(f.q || '').slice(0, 400)}`)
+      lines.push(`答：${String(f.a || '').slice(0, 600)}`)
+    }
+  }
+  lines.push('')
+  lines.push('## 用户的新问题')
+  lines.push(String(question || '').trim())
+  lines.push('')
+  lines.push('## 回答要求')
+  lines.push('1. 优先基于报告结论回答；引用结论或模型名时注明（如「正如损失厌恶指出的」）。')
+  lines.push('2. 如果问题超出报告覆盖范围（比如要用未选用的模型做新分析），先说明这一点，再给出你自己的分析，并注明「这是报告外的补充视角」。')
+  lines.push('3. 具体直白，给可执行的判断；200-600 字，除非用户要求展开。')
+  lines.push('4. 直接输出回答正文（markdown），不要 JSON、不要标记、不要复述问题。')
+  return lines.join('\n')
+}
+
 /** 从 AI 回复文本中提取标记后的 JSON 对象。失败返回 null。 */
 function extractMindJson(text) {
   if (typeof text !== 'string' || !text) return null
@@ -357,10 +427,12 @@ module.exports = {
   buildManualPrompt,
   buildRecommendPrompt,
   buildGrillPrompt,
+  buildFollowupPrompt,
   extractMindJson,
   normalizeResults,
   normalizeSynthesis,
   normalizePicks,
   normalizeQuestions,
   compactResults,
+  compactReportContext,
 }
