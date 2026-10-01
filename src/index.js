@@ -505,15 +505,47 @@ module.exports = {
 
     function startRecommend(question, context) {
       const id = `rec-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`
-      const rec = { id, question, context, status: 'running', picks: [], dropped: [], rationale: '', error: '', startedAt: Date.now(), session: null }
+      const rec = { id, kind: 'recommend', question, context, status: 'running', picks: [], dropped: [], rationale: '', error: '', startedAt: Date.now(), session: null }
       recJobs.set(id, rec)
-      // 30 分钟前的旧推荐惰性清理
+      // 30 分钟前的旧任务惰性清理
       for (const [rid, r] of recJobs) {
         if (Date.now() - r.startedAt > 30 * 60 * 1000) recJobs.delete(rid)
       }
       runRecommend(rec).catch(() => {})
       return rec
     }
+
+    // ── AI 拷问澄清（grill）──分析前的意图澄清：AI 出要害追问，用户作答后
+    // 并入背景，让后续多模型分析更贴身。与推荐共用任务基础设施。
+    async function runGrill(job) {
+      try {
+        const text = await runSession(
+          'grill',
+          prompt.buildGrillPrompt(job.question, job.context),
+          (session) => { job.session = session },
+          6 * 60 * 1000,
+          sessionTitleFor(job.question, '拷问澄清'),
+        )
+        const parsed = prompt.extractMindJson(text)
+        const { questions } = prompt.normalizeQuestions(parsed)
+        if (!questions.length) throw new Error('AI 未能给出有效追问（结构化结果为空）')
+        job.questions = questions
+        job.rationale = (typeof parsed === 'object' && parsed && typeof parsed.rationale === 'string' ? parsed.rationale : '').slice(0, 500)
+        job.status = 'done'
+      } catch (e) {
+        job.status = 'error'
+        job.error = String((e && e.message) || e).slice(0, 300)
+      }
+    }
+
+    function startGrill(question, context) {
+      const id = `grill-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`
+      const job = { id, kind: 'grill', question, context, status: 'running', questions: [], rationale: '', error: '', startedAt: Date.now(), session: null }
+      recJobs.set(id, job)
+      runGrill(job).catch(() => {})
+      return job
+    }
+
 
     // ── HTTP API ────────────────────────────────────────────────────────────
 
@@ -592,7 +624,7 @@ module.exports = {
 
             if (req.method === 'GET' && path.endsWith('/ai-recommend')) {
               const rec = recJobs.get(url.searchParams.get('id') || '')
-              if (!rec) { sendJson(404, { error: '推荐任务不存在（宿主重启后不保留）' }); return }
+              if (!rec || rec.kind !== 'recommend') { sendJson(404, { error: '推荐任务不存在（宿主重启后不保留）' }); return }
               // 运行中：刷新流式文本尾，给客户端「对话过程」视图
               if (rec.status === 'running' && rec.session) {
                 try { rec.textTail = liveTextTail(rec.session) } catch { /* 保持上次值 */ }
@@ -606,6 +638,36 @@ module.exports = {
                 dropped: rec.dropped,
                 error: rec.error || undefined,
                 elapsedMs: Date.now() - rec.startedAt,
+              })
+              return
+            }
+
+            if (req.method === 'POST' && path.endsWith('/grill')) {
+              let body = {}
+              try { body = JSON.parse((await readBody(req, 64 * 1024)) || '{}') } catch { /* 空体 */ }
+              const question = typeof body.question === 'string' ? body.question.trim().slice(0, 2000) : ''
+              if (!question) { sendJson(400, { errors: ['question 不能为空'] }); return }
+              if (!agentsService()) { sendJson(503, { error: 'agents 服务不可用，可直接跳过澄清继续分析' }); return }
+              const context = typeof body.context === 'string' ? body.context.trim().slice(0, 4000) : ''
+              const job = startGrill(question, context)
+              sendJson(202, { id: job.id })
+              return
+            }
+
+            if (req.method === 'GET' && path.endsWith('/grill')) {
+              const job = recJobs.get(url.searchParams.get('id') || '')
+              if (!job || job.kind !== 'grill') { sendJson(404, { error: '拷问任务不存在（宿主重启后不保留）' }); return }
+              if (job.status === 'running' && job.session) {
+                try { job.textTail = liveTextTail(job.session) } catch { /* 保持上次值 */ }
+              }
+              sendJson(200, {
+                id: job.id,
+                status: job.status,
+                textTail: job.textTail || '',
+                questions: job.questions,
+                rationale: job.rationale,
+                error: job.error || undefined,
+                elapsedMs: Date.now() - job.startedAt,
               })
               return
             }

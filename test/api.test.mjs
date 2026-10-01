@@ -252,3 +252,19 @@ test('jobVisible：仅进行中可见，落定（完成/失败/取消）即移�
   assert.equal(jobVisible({ status: 'aborted', settledAt: 0 }), false)
   assert.equal(jobVisible(null), false)
 })
+
+test('AI 拷问：无 agents 服务时 503（可跳过继续）；未知 id 404', async () => {
+  const medium = new Map()
+  const { ctx, routes, cleanups } = mockCtx(medium)
+  try {
+    Host.apply(ctx)
+    const res = mockRes()
+    await routes[0].handler(mockReq('POST', '/dsh-thinktank/api/grill', JSON.stringify({ question: 'q' })), res)
+    assert.equal(res.status, 503)
+    const bad = mockRes()
+    await routes[0].handler(mockReq('GET', '/dsh-thinktank/api/grill?id=nope'), bad)
+    assert.equal(bad.status, 404)
+  } finally {
+    for (const cleanup of cleanups) cleanup()
+  }
+})

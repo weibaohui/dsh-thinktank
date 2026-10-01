@@ -697,8 +697,98 @@ function ManualModal({ question, context, modelIds, onClose, onImported }) {
 }
 
 // ── 向导组件 ────────────────────────────────────────────────────────────────
+// ── 拷问澄清步骤（grill-me 风格，可跳过）：AI 出要害追问，回答并入背景 ────
+function GrillStep({ question, context, agentsOk, onBack, onProceed }) {
+  const [status, setStatus] = React.useState('idle') // idle | running | done | error
+  const [jobId, setJobId] = React.useState(null)
+  const [textTail, setTextTail] = React.useState('')
+  const [questions, setQuestions] = React.useState([])
+  const [answers, setAnswers] = React.useState({})
+  const [err, setErr] = React.useState('')
+  const [elapsed, setElapsed] = React.useState(0)
+  const liveRef = React.useRef(null)
+
+  const start = async () => {
+    setErr('')
+    try {
+      const r = await api('POST', '/grill', { question: question.trim(), context: context.trim() })
+      setJobId(r.id)
+      setStatus('running')
+    } catch (e) { setErr(String(e.message || e)) }
+  }
+
+  React.useEffect(() => {
+    if (!jobId || status !== 'running') return undefined
+    const t = setInterval(async () => {
+      try {
+        const j = await api('GET', `/grill?id=${encodeURIComponent(jobId)}`)
+        setTextTail(j.textTail || '')
+        setElapsed(j.elapsedMs || 0)
+        if (j.status === 'done') { setQuestions(j.questions || []); setStatus('done') }
+        else if (j.status === 'error') { setErr(j.error || '拷问失败'); setStatus('error') }
+      } catch (e) { setErr(String(e.message || e)); setStatus('error') }
+    }, 1000)
+    return () => clearInterval(t)
+  }, [jobId, status])
+
+  React.useEffect(() => {
+    const el = liveRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [textTail])
+
+  // 回答并入背景：有回答的问答进【澄清问答】段，无回答则背景原样
+  const proceed = () => {
+    const answered = questions.filter((q) => (answers[q.q] || '').trim())
+    if (!answered.length) { onProceed(context); return }
+    const block = answered.map((q) => `问：${q.q}\n答：${answers[q.q].trim()}`).join('\n')
+    const extra = `【澄清问答】\n${block}`
+    onProceed(context ? `${context}\n\n${extra}` : extra)
+  }
+  const answeredCount = questions.filter((q) => (answers[q.q] || '').trim()).length
+
+  return h('div', null,
+    h('div', { className: 'dshmm-card', style: { padding: '12px 14px', marginBottom: 10 } },
+      h('div', { style: { fontWeight: 700, marginBottom: 4 } }, '🪞 拷问澄清（可选，可跳过）'),
+      h('div', { className: 'dshmm-sub' }, 'AI 顾问会先扮演拷问者：用几个要害问题逼你把目标、约束、隐藏假设想清楚。想清楚再分析，结论明显更贴身。'),
+      status === 'idle' || status === 'error' ? h('div', { className: 'dshmm-row', style: { marginTop: 10 } },
+        h('button', { className: 'dshmm-btn primary', style: { padding: '8px 16px' }, onClick: start, disabled: agentsOk === false, title: agentsOk === false ? 'agents 服务不可用' : '约需十几秒' }, '🪞 让 AI 拷问我'),
+        h('button', { className: 'dshmm-btn', style: { padding: '8px 14px' }, onClick: () => onProceed(context) }, '跳过，直接选模型 →'),
+        err ? h('span', { className: 'dshmm-sub', style: { color: 'var(--mm-danger)' } }, err) : null,
+      ) : null,
+      status === 'running' ? h('div', { style: { marginTop: 10 } },
+        h('div', { className: 'dshmm-row', style: { marginBottom: 6 } },
+          h('span', { className: 'dshmm-spin' }),
+          h('span', { className: 'dshmm-sub' }, `AI 正在针对你的问题设计拷问… ${fmtDur(elapsed)}`),
+        ),
+        h('div', { ref: liveRef, className: 'dshmm-ai-live', style: { height: 140 } }, textTail || '（等待 AI 开始输出…）'),
+      ) : null,
+    ),
+    status === 'done' ? h('div', null,
+      questions.map((q, i) => h('div', { key: i, className: 'dshmm-card', style: { padding: '10px 12px', marginBottom: 8 } },
+        h('div', { style: { fontWeight: 600 } }, `${i + 1}. ${q.q}`),
+        q.why ? h('div', { className: 'dshmm-sub', style: { marginTop: 2 } }, `↳ ${q.why}`) : null,
+        h('textarea', {
+          className: 'dshmm-ta', style: { minHeight: 56, marginTop: 6 },
+          placeholder: '你的回答（可留空）——回答会并入背景，让分析更准',
+          value: answers[q.q] || '',
+          onChange: (e) => setAnswers({ ...answers, [q.q]: e.target.value.slice(0, 800) }),
+          maxLength: 800,
+        }),
+      )),
+      h('div', { className: 'dshmm-row', style: { justifyContent: 'space-between' } },
+        h('button', { className: 'dshmm-btn', onClick: () => onProceed(context) }, '跳过剩余，直接选模型 →'),
+        h('button', {
+          className: 'dshmm-btn primary', style: { padding: '8px 16px' },
+          onClick: proceed, disabled: answeredCount === 0,
+        }, `把 ${answeredCount} 条回答并入背景，继续 →`),
+      ),
+    ) : null,
+  )
+}
+
 function StepsBar({ step }) {
-  const steps = ['输入问题', '选择模型', '确认提交']
+  const steps = ['输入问题', '澄清意图', '选择模型', '确认提交']
+  const hints = { 2: '可跳过' }
   const nodes = []
   steps.forEach((label, i) => {
     const n = i + 1
@@ -706,6 +796,7 @@ function StepsBar({ step }) {
     nodes.push(h('div', { key: n, className: 'dshmm-step' + cls },
       h('span', { className: 'n' }, step > n ? '✓' : String(n)),
       h('span', null, label),
+      hints[n] ? h('span', { className: 'dshmm-sub', style: { fontSize: 10 } }, hints[n]) : null,
     ))
     if (n < steps.length) nodes.push(h('div', { key: 'line' + n, className: 'dshmm-step-line' }))
   })
@@ -973,21 +1064,26 @@ function MindPanel({ variant }) {
   const gotoStep = (n) => {
     setErr('')
     if (n >= 2 && !question.trim()) { setErr('请先输入要分析的问题'); return }
-    if (n >= 3 && !selected.size) { setErr('请至少选择一个思维模型'); return }
-    if (n >= 3 && selected.size > 36) { setErr('单次最多选择 36 个模型，请精简'); return }
+    if (n >= 4 && !selected.size) { setErr('请至少选择一个思维模型'); return }
+    if (n >= 4 && selected.size > 36) { setErr('单次最多选择 36 个模型，请精简'); return }
     setStep(n)
   }
 
   const analyzeView = h('div', null,
     h(StepsBar, { step }),
     step === 1 ? h(StepQuestion, { question, setQuestion, context, setContext, onNext: () => gotoStep(2) }) : null,
-    step === 2 ? h(StepModels, {
-      selected, onToggle: toggleModel, onBatch: batchSelect, question, context, agentsOk,
-      onBack: () => setStep(1), onNext: () => gotoStep(3),
+    step === 2 ? h(GrillStep, {
+      question: question.trim(), context: context.trim(), agentsOk,
+      onBack: () => setStep(1),
+      onProceed: (newContext) => { setContext(typeof newContext === 'string' ? newContext : context); gotoStep(3) },
     }) : null,
-    step === 3 ? h(StepConfirm, {
+    step === 3 ? h(StepModels, {
+      selected, onToggle: toggleModel, onBatch: batchSelect, question, context, agentsOk,
+      onBack: () => setStep(2), onNext: () => gotoStep(4),
+    }) : null,
+    step === 4 ? h(StepConfirm, {
       question: question.trim(), context: context.trim(), selectedIds: [...selected], agentsOk,
-      onBack: () => setStep(2),
+      onBack: () => setStep(3),
       onAuto: startAnalyze,
       onManual: () => { setErr(''); setManual(true) },
       onRemove: toggleModel,

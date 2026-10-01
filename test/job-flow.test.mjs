@@ -286,3 +286,44 @@ test('任务落定后立即从 /jobs 任务区消失', async () => {
     for (const cleanup of cleanups) cleanup()
   }
 })
+
+test('拷问澄清流水线：AI 出要害追问 → 校验 → 状态可读', async () => {
+  const medium = new Map()
+  const { ctx, routes, cleanups, titles } = mockCtxWithAgents(medium, {
+    replyFor: (sessionId) => {
+      if (sessionId.includes('grill')) {
+        return '最含糊的是「改造」的边界。\n' + P.JSON_MARKER + '\n' + JSON.stringify({
+          questions: [
+            { q: '8 万是硬上限还是意愿值？', why: '逼出真实约束' },
+            { q: '做半年做不起来怎么办？', why: '最坏承受力' },
+            { id: 'x', q: '' },
+          ],
+        })
+      }
+      return 'junk'
+    },
+  })
+  try {
+    Host.apply(ctx)
+    const route = routes[0]
+    const start = mockRes()
+    await route.handler(mockReq('POST', '/dsh-thinktank/api/grill', JSON.stringify({ question: '要不要做民宿短租？' })), start)
+    assert.equal(start.status, 202)
+    const { id } = JSON.parse(start.body)
+
+    let job = null
+    for (let i = 0; i < 100; i++) {
+      const res = mockRes()
+      await route.handler(mockReq('GET', `/dsh-thinktank/api/grill?id=${id}`), res)
+      job = JSON.parse(res.body)
+      if (job.status !== 'running') break
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    assert.equal(job.status, 'done')
+    assert.equal(job.questions.length, 2, '空问题被过滤')
+    assert.equal(job.questions[0].q, '8 万是硬上限还是意愿值？')
+    assert.ok(titles.some((t) => t.includes('拷问澄清')), `缺拷问标题：${JSON.stringify(titles)}`)
+  } finally {
+    for (const cleanup of cleanups) cleanup()
+  }
+})

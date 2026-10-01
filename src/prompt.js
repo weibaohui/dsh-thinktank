@@ -194,6 +194,49 @@ function normalizePicks(parsed, knownIds) {
 
 
 
+/**
+ * 拷问澄清提示词（grill-me 风格）：针对用户问题生成 3-6 个要害追问，
+ * 帮用户在分析前把意图、目标、约束、隐藏假设想清楚。
+ * 输出契约：questions[]，每项 {q, why}。
+ */
+function buildGrillPrompt(question, context) {
+  const lines = []
+  lines.push('你是一位犀利但建设性的决策拷问者（grilling）。用户提出了一个问题想获得多模型分析，但在那之前，你需要用几个要害问题逼他把意图想清楚——含糊的问题只会得到含糊的分析。')
+  lines.push('')
+  lines.push(problemBlock(question, context))
+  lines.push('')
+  lines.push('## 拷问要求')
+  lines.push('1. 生成 3-6 个最要害的追问，聚焦：隐藏假设（他默认了什么为真）、成功标准（做到什么程度算值得）、真实约束（钱/时间/精力/关系的硬上限）、机会成本（不做会怎样、替代方案为何不够）、最坏承受力（失败了能不能兜住）。')
+  lines.push('2. 问题必须针对这个问题的具体语境，禁止通用的「你的目标是什么」式空问；如果他给的背景里已经写清了某点，就不要再问。')
+  lines.push('3. 每个问题附一句 why：说明这个问题能把什么逼到台面上。')
+  lines.push('4. 语气直接、不带攻击性；一次拷问不要超过 6 问，贪多用户就不答了。')
+  lines.push('')
+  lines.push('## 输出格式（严格遵守）')
+  lines.push('可在开头用一句话点破你看到的最关键的含糊之处，然后在回复最后一行单独输出标记 ' + JSON_MARKER + '，紧随其后输出一个 JSON 对象（不要用代码围栏包裹）：')
+  lines.push(JSON.stringify({
+    questions: [{ q: '要害追问（具体、可直接回答）', why: '这个问题把什么逼到台面上' }],
+  }, null, 2))
+  lines.push('')
+  lines.push('只允许输出一个 ' + JSON_MARKER + ' 标记，JSON 必须是其后的唯一内容。')
+  return lines.join('\n')
+}
+
+/** 校验拷问问题：条数上限 6、长度钳制、去重。 */
+function normalizeQuestions(parsed) {
+  const arr = parsed && typeof parsed === 'object' && Array.isArray(parsed.questions) ? parsed.questions : []
+  const questions = []
+  const seen = new Set()
+  for (const item of arr.slice(0, 10)) {
+    if (!item || typeof item !== 'object') continue
+    const q = trunc(item.q, 200)
+    if (!q || seen.has(q)) continue
+    seen.add(q)
+    questions.push({ q, why: trunc(item.why, 200) })
+    if (questions.length >= 6) break
+  }
+  return { questions }
+}
+
 /** 从 AI 回复文本中提取标记后的 JSON 对象。失败返回 null。 */
 function extractMindJson(text) {
   if (typeof text !== 'string' || !text) return null
@@ -313,9 +356,11 @@ module.exports = {
   buildSynthesisPrompt,
   buildManualPrompt,
   buildRecommendPrompt,
+  buildGrillPrompt,
   extractMindJson,
   normalizeResults,
   normalizeSynthesis,
   normalizePicks,
+  normalizeQuestions,
   compactResults,
 }

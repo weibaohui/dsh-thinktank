@@ -121,3 +121,34 @@ test('normalizePicks：未知 id 丢弃、去重、理由截断、上限 15', ()
   assert.equal(P.normalizePicks(null, known).picks.length, 0)
   assert.equal(P.normalizePicks({}, known).picks.length, 0)
 })
+
+test('buildGrillPrompt：含问题背景与 questions 契约', () => {
+  const text = P.buildGrillPrompt('要不要转行', '今年 35 岁')
+  assert.match(text, /要不要转行/)
+  assert.match(text, /今年 35 岁/)
+  assert.match(text, /隐藏假设/)
+  assert.match(text, /===MIND-JSON===/)
+  assert.match(text, /questions/)
+})
+
+test('normalizeQuestions：去重、截断、上限 6', () => {
+  const { questions } = P.normalizeQuestions({
+    questions: [
+      { q: 'q'.repeat(500), why: 'w' },
+      { q: 'q1', why: 'w1' },
+      { q: 'q1' },
+      { q: 'q2' },
+      { q: '', why: 'x' },
+      'junk',
+    ],
+  })
+  assert.equal(questions.length, 3)
+  assert.equal(questions[0].q.length, 200)
+  assert.equal(questions[1].q, 'q1')
+  assert.equal(questions[1].why, 'w1')
+  assert.equal(questions[2].q, 'q2')
+  assert.equal(questions[2].why, '', '缺 why 兜底空串')
+  assert.equal(P.normalizeQuestions(null).questions.length, 0)
+  const many = P.normalizeQuestions({ questions: Array.from({ length: 10 }, (_, i) => ({ q: 'q' + i })) })
+  assert.equal(many.questions.length, 6, '上限 6 问')
+})
