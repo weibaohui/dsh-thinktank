@@ -9,7 +9,7 @@
   window.addEventListener('error', (e) => slog('PAGE-ERROR: ' + e.message))
   const responses = {
     'GET /dsh-thinktank/api/config': { entry: 'sidebar' },
-    'GET /dsh-thinktank/api/status': { storage: 'domain', storageError: '', agentsAvailable: true, modelCount: 144, categories: 9, jobsRunning: 0 },
+    'GET /dsh-thinktank/api/status': { storage: 'domain', storageError: '', agentsAvailable: true, modelCount: 161, categories: 9, jobsRunning: 0 },
     'GET /dsh-thinktank/api/reports': { reports: [] },
     'POST /dsh-thinktank/api/analyze': { jobId: 'j1', batches: 2 },
     'GET /dsh-thinktank/api/jobs': { jobs: [{
@@ -88,7 +88,7 @@
       setTimeout(() => { if (next) next.click() }, 50)
     }, 1200)
 
-    // 第 2 步：144 张模型卡，默认已选 6（绶带=6），再点选 1 张
+    // 第 2 步：161 张模型卡，默认已选 6（绶带=6），再点选 1 张
     setTimeout(() => {
       const root = document.getElementById('root')
       slog('S2 model-cards=' + root.querySelectorAll('.dshmm-model').length)
@@ -110,7 +110,7 @@
           slog('S25 notice-text=' + (notice ? notice.textContent.slice(0, 60) : ''))
           const onlyChip = [...root.querySelectorAll('.dshmm-chip')].find((c) => c.textContent.includes('只看推荐'))
           slog('S25 onlyRec-active=' + (onlyChip ? onlyChip.classList.contains('active') : 'missing'))
-          slog('S25 visible-cards=' + root.querySelectorAll('.dshmm-model').length + '（推荐过滤后应远小于144）')
+          slog('S25 visible-cards=' + root.querySelectorAll('.dshmm-model').length + '（推荐过滤后应远小于161）')
           slog('S25 rec-badges=' + root.querySelectorAll('.dshmm-rec').length)
 
           // AI 智能推荐：弹窗 → 流式过程 → 结果勾选 → 采用

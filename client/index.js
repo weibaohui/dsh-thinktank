@@ -2,7 +2,7 @@
 /**
  * dsh-thinktank — Client 半体
  *
- * 侧边栏/设置页面板：输入问题 → 从 144 个思维模型中选择（支持搜索、分类筛选、
+ * 侧边栏/设置页面板：输入问题 → 从 161 个思维模型中选择（支持搜索、分类筛选、
  * 本地启发式推荐）→ 两种执行模式：
  *   1) 自动分析：host 起分批 agent 会话并行分析 + 综合会话，面板轮询进度；
  *   2) 提示词往返：生成整段提示词复制到任意会话执行，粘回 JSON 导入。
@@ -1050,7 +1050,7 @@ function MindPanel({ variant }) {
     h('div', { className: 'dshmm-head' },
       h('span', { style: { fontSize: 16 } }, '🦉'),
       h('strong', { style: { fontSize: 15, marginRight: 4 } }, '智囊团'),
-      h('span', { className: 'dshmm-sub', style: { marginRight: 8 } }, '144 位思维顾问为你出主意'),
+      h('span', { className: 'dshmm-sub', style: { marginRight: 8 } }, `${models.MODELS.length} 位思维顾问为你出主意`),
       h('span', { className: 'dshmm-tab' + (view === 'analyze' ? ' active' : ''), onClick: () => setView('analyze') }, '分析'),
       h('span', { className: 'dshmm-tab' + (view === 'library' ? ' active' : ''), onClick: () => setView('library') }, `模型库 (${models.MODELS.length})`),
       h('span', {
