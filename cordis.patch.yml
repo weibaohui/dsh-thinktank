@@ -1,0 +1,12 @@
+# dsh-thinktank bundle patch: contributes the plugin row into the
+# host composition when this package is installed via `dsh plugin add`.
+#
+# The plugin is HOST-PLANE: it serves the thinking-model catalog, runs
+# analysis jobs (agent sessions applying N mental models to one question),
+# persists reports in a storageDomain, and its client half registers a
+# sidebar panel / settings section. It must therefore land in the host
+# composition (this insert), never inside an agent preset.
+
+- insert:
+    - id: dsh-thinktank
+      name: '@weibaohui/dsh-thinktank'

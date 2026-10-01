@@ -1,0 +1,202 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><style>body{margin:0;background:#f6f7f9;font-family:-apple-system,"PingFang SC",sans-serif}</style></head>
+<body>
+<div id="root"></div>
+<pre id="log" style="position:fixed;left:0;bottom:0;max-height:40vh;overflow:auto;background:#fff;border-top:1px solid #ccc;font-size:11px;margin:0;padding:4px;width:100%"></pre>
+<script>
+  const slog = (m) => { document.getElementById('log').textContent += m + '\n' }
+  window.addEventListener('error', (e) => slog('PAGE-ERROR: ' + e.message))
+  const responses = {
+    'GET /dsh-thinktank/api/config': { entry: 'sidebar' },
+    'GET /dsh-thinktank/api/status': { storage: 'domain', storageError: '', agentsAvailable: true, modelCount: 144, categories: 9, jobsRunning: 0 },
+    'GET /dsh-thinktank/api/reports': { reports: [] },
+    'POST /dsh-thinktank/api/analyze': { jobId: 'j1', batches: 2 },
+    'GET /dsh-thinktank/api/jobs': { jobs: [{
+      id: 'j1', status: 'running', question: '要不要出海？', createdAt: '2026-10-01T00:00:00Z',
+      modelCount: 6, resultsCount: 2, synthesisStatus: 'pending', durationMs: 12000,
+      batches: [
+        { index: 0, status: 'done', count: 2, models: ['swot', 'pestel'] },
+        { index: 1, status: 'running', count: 0, models: ['hook', 'fogg', 'mvp', 'pmf'] },
+      ],
+      results: [
+        { id: 'swot', verdict: '优势足以支撑试点', signal: 'positive', insights: [], actions: [] },
+        { id: 'pestel', verdict: '政策窗口期已到', signal: 'risk', insights: [], actions: [] },
+      ],
+    }] },
+  }
+  let aiPolls = 0
+  const dynamic = (key) => {
+    if (key === 'POST /dsh-thinktank/api/ai-recommend') return { status: 202, body: { id: 'rec1' } }
+    if (key.indexOf('GET /dsh-thinktank/api/ai-recommend') === 0) {
+      aiPolls++
+      if (aiPolls < 2) return { status: 200, body: { id: 'rec1', status: 'running', textTail: '正在阅读模型库…\n先看宏观类：PESTEL、波特五力…', picks: [], elapsedMs: 1000 } }
+      return { status: 200, body: { id: 'rec1', status: 'done', picks: [{ id: 'pestel', reason: '转型先看宏观政策与技术周期' }, { id: 'hook', reason: 'AI 产品要考虑习惯留存' }], rationale: '先宏观后产品，先趋势后执行', textTail: '完成', elapsedMs: 3000 } }
+    }
+    return null
+  }
+  window.fetch = async (url, opts) => {
+    const method = (opts && opts.method) || 'GET'
+    const key = method + ' ' + String(url)
+    slog('FETCH ' + key)
+    const dyn = dynamic(key)
+    if (dyn) return { ok: true, status: dyn.status, json: async () => dyn.body }
+    const body = responses[key]
+    return { ok: body !== undefined, status: body !== undefined ? 200 : 404, json: async () => body !== undefined ? body : { error: 'not found' } }
+  }
+  let factoryEntry = null
+  window.__ModuleLoader__ = { load: (e) => { factoryEntry = e; slog('MODULE-LOADED ' + e.id) } }
+</script>
+<script src="./vendor-react.min.js"></script>
+<script src="./vendor-react-dom.min.js"></script>
+<script src="../client/bundle.js"></script>
+<script>
+  const requireStub = (name) => {
+    if (name === 'react') return window.React
+    throw new Error('unexpected require: ' + name)
+  }
+  const btn = (txt) => [...document.querySelectorAll('button')].find((b) => b.textContent.includes(txt))
+  const setTextarea = (el, v) => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(el, v)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+  try {
+    const mod = factoryEntry.factory(requireStub)
+    slog('FACTORY-OK exports keys=' + Object.keys(mod).join(','))
+    const regs = []
+    const slots = {
+      inject: (name, fn) => { slog('INJECT ' + name); try { const d = fn(); return () => { try { if (typeof d === 'function') d() } catch {} } } catch (e) { slog('INJECT-FAIL ' + name + ' ' + e.message); return () => {} } },
+      register: (meta, render) => { regs.push({ meta, render }); slog('REGISTER ' + meta.name + ' id=' + (meta.id || meta.key || '')); return () => {} },
+    }
+    const ctx = { get: (n) => (n === 'slots' ? slots : undefined), effect: () => {} }
+    mod.apply(ctx)
+    const main = regs.find((r) => r.meta && r.meta.name === 'main')
+    if (!main) { slog('NO-MAIN-REGISTRATION') } else {
+      window.ReactDOM.createRoot(document.getElementById('root')).render(main.render())
+    }
+
+    // 第 1 步：步骤条 + 问题输入，无模型卡片
+    setTimeout(() => {
+      const root = document.getElementById('root')
+      slog('S1 steps=' + root.querySelectorAll('.dshmm-step').length)
+      slog('S1 textarea=' + root.querySelectorAll('textarea').length)
+      slog('S1 model-cards=' + root.querySelectorAll('.dshmm-model').length + '（第一步应为 0）')
+      const next = btn('下一步')
+      slog('S1 next-btn=' + !!next)
+      setTextarea(root.querySelector('textarea'), '公司要不要 All in AI 转型？')
+      setTimeout(() => { if (next) next.click() }, 50)
+    }, 1200)
+
+    // 第 2 步：144 张模型卡，默认已选 6（绶带=6），再点选 1 张
+    setTimeout(() => {
+      const root = document.getElementById('root')
+      slog('S2 model-cards=' + root.querySelectorAll('.dshmm-model').length)
+      slog('S2 sel-default=' + root.querySelectorAll('.dshmm-model.sel').length + '（默认应为 0）')
+      slog('S2 ribbons=' + root.querySelectorAll('.dshmm-ribbon').length)
+      slog('S2 checks-on=' + root.querySelectorAll('.dshmm-check.on').length)
+      const nextBtn0 = btn('下一步')
+      slog('S2 next-disabled-when-0=' + (nextBtn0 ? nextBtn0.disabled : 'N/A'))
+      const card = root.querySelector('.dshmm-model:not(.sel)')
+      if (card) card.click()
+      setTimeout(() => {
+        slog('S2 sel-after-click=' + root.querySelectorAll('.dshmm-model.sel').length)
+        // 关键词匹配：出提示条 + 自动切「只看推荐」+ 新勾选
+        const rec = btn('关键词匹配')
+        if (rec) rec.click()
+        setTimeout(() => {
+          const notice = root.querySelector('.dshmm-notice')
+          slog('S25 notice=' + !!notice)
+          slog('S25 notice-text=' + (notice ? notice.textContent.slice(0, 60) : ''))
+          const onlyChip = [...root.querySelectorAll('.dshmm-chip')].find((c) => c.textContent.includes('只看推荐'))
+          slog('S25 onlyRec-active=' + (onlyChip ? onlyChip.classList.contains('active') : 'missing'))
+          slog('S25 visible-cards=' + root.querySelectorAll('.dshmm-model').length + '（推荐过滤后应远小于144）')
+          slog('S25 rec-badges=' + root.querySelectorAll('.dshmm-rec').length)
+
+          // AI 智能推荐：弹窗 → 流式过程 → 结果勾选 → 采用
+          const aiBtn = btn('AI 智能推荐')
+          slog('S26 ai-btn=' + !!aiBtn)
+          if (aiBtn) aiBtn.click()
+          setTimeout(() => {
+            slog('S26 modal=' + !!root.querySelector('.dshmm-modal'))
+            slog('S26 live=' + !!root.querySelector('.dshmm-ai-live'))
+          }, 300)
+          setTimeout(() => {
+            const picks = root.querySelectorAll('.dshmm-modal .dshmm-model')
+            slog('S26 picks=' + picks.length)
+            slog('S26 rationale=' + (root.textContent.includes('先宏观后产品')))
+            const apply = btn('采用所选')
+            slog('S26 apply-btn=' + !!apply)
+            if (apply) apply.click()
+            setTimeout(() => {
+              slog('S26 modal-closed=' + !root.querySelector('.dshmm-modal'))
+              slog('S26 sel-after-ai=' + root.querySelectorAll('.dshmm-model.sel').length)
+              const next = btn('下一步')
+              if (next) next.click()
+            }, 200)
+          }, 3200) // 两次 1s 轮询后 done
+        }, 150)
+      }, 100)
+    }, 2200)
+
+    // 第 3 步：确认页摘要（问题文本 + 模型数与胶囊一致），自动分析按钮可用
+    setTimeout(() => {
+      const root = document.getElementById('root')
+      const text = root.textContent || ''
+      slog('S3 has-question=' + text.includes('公司要不要 All in AI 转型？'))
+      const m = text.match(/将使用 (\d+) 个思维模型/)
+      const n = m ? Number(m[1]) : 0
+      const chips = root.querySelectorAll('.dshmm-sum-m').length
+      slog('S3 selected-count=' + n + '（推荐后应 >= 7）')
+      slog('S3 sum-chips=' + chips + ' 与计数一致=' + (chips === n))
+      const auto = btn('开始自动分析')
+      slog('S3 auto-btn=' + !!auto + ' disabled=' + (auto ? auto.disabled : 'N/A'))
+      slog('S3 manual-btn=' + !!btn('提示词往返'))
+      slog('PANEL-ERRORS=' + (globalThis.__dshThinktankErrors || []).length)
+
+      // 确认页点 × 移除一个模型：计数与胶囊同步减一
+      const x = root.querySelector('.dshmm-sum-m .x')
+      slog('S3 chip-x=' + !!x)
+      if (x) x.click()
+      setTimeout(() => {
+        const n2 = Number(((root.textContent || '').match(/将使用 (\d+) 个思维模型/) || [0, 0])[1])
+        slog('S3 after-remove=' + n2 + '（应为 ' + (n - 1) + '）一致=' + (n2 === n - 1))
+        slog('S3 chips-sync=' + (root.querySelectorAll('.dshmm-sum-m').length === n2))
+
+        // 第 4 阶段：点「开始自动分析」→ 自动跳到历史页 → 实时任务卡片（批次+结论）
+        const auto2 = btn('开始自动分析')
+        if (auto2) auto2.click()
+      setTimeout(() => {
+        const t = root.textContent || ''
+        slog('S4 auto-nav-history=' + (root.querySelector('.dshmm-tab.active') ? root.querySelector('.dshmm-tab.active').textContent === '历史' || [...root.querySelectorAll('.dshmm-tab')].some((x) => x.classList.contains('active') && x.textContent === '历史') : false))
+        slog('S4 live-card=' + !!root.querySelector('.dshmm-live'))
+        slog('S4 running-badge=' + t.includes('进行中'))
+        slog('S4 question=' + t.includes('要不要出海？'))
+        slog('S4 batch-done=' + t.includes('批次1 ✓2'))
+        slog('S4 result-swot=' + t.includes('SWOT 分析'))
+        slog('S4 result-pestel=' + t.includes('PESTEL 宏观分析'))
+        slog('S4 verdict=' + t.includes('优势足以支撑试点'))
+        slog('S4 cancel-btn=' + !!btn('取消'))
+        slog('S4 empty-hist=' + t.includes('还没有保存的报告'))
+        slog('PANEL-ERRORS-FINAL=' + (globalThis.__dshThinktankErrors || []).length)
+
+        // 第 5 阶段：回分析页——向导已重置为第 1 步、问题清空、恢复默认选择
+        const analyzeTab = [...root.querySelectorAll('.dshmm-tab')].find((x) => x.textContent === '分析')
+        if (analyzeTab) analyzeTab.click()
+        setTimeout(() => {
+          const ta = root.querySelector('textarea')
+          slog('S5 back-step1=' + !!root.querySelector('.dshmm-step.active'))
+          slog('S5 question-cleared=' + (ta ? ta.value === '' : false))
+          slog('S5 steps=' + root.querySelectorAll('.dshmm-step').length)
+          const activeStep = root.querySelector('.dshmm-step.active')
+          slog('S5 active-is-step1=' + (activeStep ? activeStep.textContent.includes('输入问题') : false))
+          slog('PANEL-ERRORS-END=' + (globalThis.__dshThinktankErrors || []).length)
+          document.title = 'HARNESS-DONE'
+        }, 300)
+      }, 900)
+      }, 150)
+    }, 6600)
+  } catch (e) { slog('HARNESS-FAIL ' + ((e && e.stack) || e)) }
+</script>
+</body>
+</html>
