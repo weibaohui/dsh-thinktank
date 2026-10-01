@@ -14,6 +14,7 @@
 
 const React = require('react')
 const models = require('../src/models')
+const md = require('./markdown')
 
 const API = '/dsh-thinktank/api'
 const PLUGIN_ID = '@weibaohui/dsh-thinktank'
@@ -120,6 +121,16 @@ const CSS = `
 .dshmm-signal { font-size:10px; border-radius:4px; padding:1px 6px; flex:none; }
 .dshmm-verdict { margin:8px 0 6px; font-weight:600; font-size:13px; }
 .dshmm-analysis { font-size:12px; color:var(--mm-text); white-space:pre-wrap; word-break:break-word; border-top:1px dashed var(--mm-border); padding-top:8px; margin-top:8px; }
+/* markdown 基本渲染 */
+.dshmm-md-p { margin:0 0 6px; white-space:pre-wrap; word-break:break-word; }
+.dshmm-md-p:last-child { margin-bottom:0; }
+.dshmm-wrap h3, .dshmm-wrap h4, .dshmm-wrap h5, .dshmm-wrap h6 { margin:10px 0 4px; font-size:13px; }
+.dshmm-md-pre { background:var(--mm-card2); border:1px solid var(--mm-border); border-radius:6px; padding:8px 10px; overflow-x:auto; font-size:11px; margin:6px 0; }
+.dshmm-md-pre code { font-family:ui-monospace, monospace; font-size:11px; }
+.dshmm-md-code { background:var(--mm-card2); border-radius:4px; padding:0 4px; font-family:ui-monospace, monospace; font-size:11px; }
+.dshmm-md-quote { border-left:3px solid var(--mm-border2); margin:6px 0; padding:2px 10px; color:var(--mm-sub); }
+.dshmm-wrap .dshmm-md a, .dshmm-md a { color:var(--mm-accent); }
+.dshmm-list li, .dshmm-syn-box li { margin-bottom:3px; }
 .dshmm-list { margin:6px 0 0; padding-left:18px; font-size:12px; }
 .dshmm-list li { margin-bottom:3px; }
 .dshmm-lib-cat { margin:14px 0 6px; font-weight:700; display:flex; align-items:center; gap:6px; }
@@ -334,13 +345,13 @@ function AiRecommendModal({ question, context, onClose, onApply }) {
           h('span', { className: 'dshmm-spin' }),
           h('span', { className: 'dshmm-sub' }, '下方为 AI 回复的实时输出过程'),
         ),
-        h('div', { ref: liveRef, className: 'dshmm-ai-live' }, textTail || '（等待 AI 开始输出…）'),
+        h('div', { ref: liveRef, className: 'dshmm-ai-live dshmm-md' }, md.renderMarkdown(textTail), !textTail ? '（等待 AI 开始输出…）' : null),
       ) : null,
 
       // 完成：选型思路 + 推荐清单（可勾选）
       status === 'done' ? h('div', null,
-        rationale ? h('div', { className: 'dshmm-card', style: { padding: '10px 12px', marginBottom: 8, fontSize: 12 } },
-          h('strong', null, '选型思路：'), rationale) : null,
+        rationale ? h('div', { className: 'dshmm-card dshmm-md', style: { padding: '10px 12px', marginBottom: 8, fontSize: 12 } },
+          h('strong', null, '选型思路：'), md.renderInline(rationale)) : null,
         h('div', { style: { maxHeight: '40vh', overflowY: 'auto' } },
           picks.map((p) => {
             const m = models.getModel(p.id)
@@ -544,14 +555,14 @@ function FollowupSection({ report, agentsOk }) {
     err ? h('div', { className: 'dshmm-err' }, err) : null,
     items.map((f, i) => h('div', { key: f.id || i, style: { marginBottom: 10 } },
       h('div', { style: { fontWeight: 600, fontSize: 12 } }, `问：${f.q}`),
-      h('div', { className: 'dshmm-analysis', style: { marginTop: 4 } }, f.a),
+      h('div', { className: 'dshmm-analysis dshmm-md', style: { marginTop: 4 } }, md.renderMarkdown(f.a)),
     )),
     running ? h('div', { className: 'dshmm-card', style: { padding: '10px 12px', marginBottom: 10 } },
       h('div', { className: 'dshmm-row', style: { marginBottom: 6 } },
         h('span', { className: 'dshmm-spin' }),
         h('div', { style: { fontWeight: 600, fontSize: 12 } }, `问：${running.q}`),
       ),
-      h('div', { ref: liveRef, className: 'dshmm-ai-live', style: { height: 140 } }, running.textTail || '（首席顾问思考中…）'),
+      h('div', { ref: liveRef, className: 'dshmm-ai-live dshmm-md', style: { height: 140 } }, md.renderMarkdown(running.textTail) , !running.textTail ? '（首席顾问思考中…）' : null),
     ) : null,
     h('div', { className: 'dshmm-row', style: { alignItems: 'flex-start' } },
       h('textarea', {
@@ -609,7 +620,7 @@ function ReportView({ report, onBack, onDelete, agentsOk }) {
   const synBox = (title, icon, arr) => (Array.isArray(arr) && arr.length)
     ? h('div', { className: 'dshmm-syn-box' },
         h('h4', null, `${icon} ${title}`),
-        h('ul', null, arr.map((s, i) => h('li', { key: i }, typeof s === 'string' ? s : String((s && (s.action || s.text)) || '')))),
+        h('ul', null, arr.map((s, i) => h('li', { key: i }, md.renderInline(typeof s === 'string' ? s : String((s && (s.action || s.text)) || ''))))),
       )
     : null
 
@@ -634,7 +645,7 @@ function ReportView({ report, onBack, onDelete, agentsOk }) {
 
     syn ? h('div', { className: 'dshmm-card dshmm-syn' },
       h('h3', { style: { margin: '0 0 8px', fontSize: 15 } }, '🧭 综合结论'),
-      syn.summary ? h('div', { style: { whiteSpace: 'pre-wrap' } }, syn.summary) : null,
+      syn.summary ? h('div', { className: 'dshmm-md' }, md.renderMarkdown(syn.summary)) : null,
       h('div', { className: 'dshmm-syn-grid' },
         synBox('模型共识', '🤝', syn.consensus),
         synBox('观点分歧', '⚡', syn.conflicts),
@@ -642,8 +653,9 @@ function ReportView({ report, onBack, onDelete, agentsOk }) {
         (Array.isArray(syn.priorities) && syn.priorities.length) ? h('div', { className: 'dshmm-syn-box' },
           h('h4', null, '✅ 行动清单'),
           h('ul', null, syn.priorities.map((p, i) => h('li', { key: i },
-            h('strong', null, typeof p === 'string' ? p : p.action),
-            typeof p === 'object' && p && p.why ? h('span', { className: 'dshmm-sub' }, ` —— ${p.why}`) : null,
+            md.renderInline(typeof p === 'string' ? p : p.action),
+            typeof p === 'object' && p && p.why ? h('span', { className: 'dshmm-sub' }, ` —— `) : null,
+            typeof p === 'object' && p && p.why ? md.renderInline(p.why) : null,
           ))),
         ) : null,
       ),
@@ -677,16 +689,16 @@ function ReportView({ report, onBack, onDelete, agentsOk }) {
             h('span', null, m ? m.name : r.id),
             h('span', { className: 'dshmm-sub', style: { fontWeight: 400, fontSize: 11 } }, m ? `${m.en} · ${catName(m.cat)}` : ''),
           ),
-          r.verdict ? h('div', { className: 'dshmm-verdict' }, r.verdict) : null,
+          r.verdict ? h('div', { className: 'dshmm-verdict' }, md.renderInline(r.verdict)) : null,
           Array.isArray(r.insights) && r.insights.length ? h('ul', { className: 'dshmm-list' },
-            r.insights.map((s, i) => h('li', { key: i }, s)),
+            r.insights.map((s, i) => h('li', { key: i }, md.renderInline(s))),
           ) : null,
           Array.isArray(r.actions) && r.actions.length ? h('div', { style: { marginTop: 6, fontSize: 12 } },
             h('span', { className: 'dshmm-sub' }, '建议：'),
-            h('ul', { className: 'dshmm-list' }, r.actions.map((s, i) => h('li', { key: i }, s))),
+            h('ul', { className: 'dshmm-list' }, r.actions.map((s, i) => h('li', { key: i }, md.renderInline(s)))),
           ) : null,
           r.analysis ? h('div', null,
-            open ? h('div', { className: 'dshmm-analysis' }, r.analysis) : null,
+            open ? h('div', { className: 'dshmm-analysis dshmm-md' }, md.renderMarkdown(r.analysis)) : null,
             h('button', { className: 'dshmm-btn', style: { marginTop: 8 }, onClick: () => setExpand({ ...expand, [r.id]: !open }) },
               open ? '收起完整分析' : '展开完整分析'),
           ) : null,
@@ -833,7 +845,7 @@ function GrillStep({ question, context, agentsOk, onBack, onProceed }) {
           h('span', { className: 'dshmm-spin' }),
           h('span', { className: 'dshmm-sub' }, `AI 正在针对你的问题设计拷问… ${fmtDur(elapsed)}`),
         ),
-        h('div', { ref: liveRef, className: 'dshmm-ai-live', style: { height: 140 } }, textTail || '（等待 AI 开始输出…）'),
+        h('div', { ref: liveRef, className: 'dshmm-ai-live dshmm-md', style: { height: 140 } }, md.renderMarkdown(textTail), !textTail ? '（等待 AI 开始输出…）' : null),
       ) : null,
     ),
     status === 'done' ? h('div', null,
@@ -1001,7 +1013,7 @@ function LiveJobCard({ job, onOpen, onCancel }) {
             h('span', { className: 'dshmm-signal', style: { background: sig.color, color: '#fff' } }, sig.label),
             h('span', null, m ? m.name : r.id),
           ),
-          r.verdict ? h('div', { className: 'dshmm-live-vd' }, r.verdict) : null,
+          r.verdict ? h('div', { className: 'dshmm-live-vd' }, md.renderInline(r.verdict)) : null,
         )
       }),
     ) : h('div', { className: 'dshmm-sub', style: { marginTop: 8 } }, '各模型结论出来后会在这里逐渐填满…'),
