@@ -8,6 +8,8 @@
 
 ## 效果演示
 
+![demo：输入问题 → 选模型 → AI 推荐 → 确认 → 实时进度 → 综合报告](https://cdn.jsdelivr.net/gh/weibaohui/dsh-thinktank@main/docs/demo.gif)
+
 | 向导三步 | 综合报告 |
 |---|---|
 | ![向导：输入问题 → 选择模型 → 确认提交](https://cdn.jsdelivr.net/gh/weibaohui/dsh-thinktank@main/docs/shots/step2.png) | ![综合报告：共识/分歧/盲区/行动清单](https://cdn.jsdelivr.net/gh/weibaohui/dsh-thinktank@main/docs/shots/report.png) |
